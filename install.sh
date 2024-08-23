@@ -4,6 +4,7 @@ echo "Installing sentinel agent"
 wget https://raw.githubusercontent.com/SumanSynth/sentinel-agent-setup/develop/sentinel-agent-linux-amd64
 sudo mkdir /opt/sentinel-agent
 sudo mv sentinel-agent-linux-amd64 /opt/sentinel-agent/sentinel-agent-linux-amd64
+sudo chmod +x /opt/sentinel-agent/sentinel-agent-linux-amd64
 
 device_id=$(uuidgen)
 echo "device_id: $device_id"
