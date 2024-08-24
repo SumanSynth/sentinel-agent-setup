@@ -14,12 +14,13 @@ echo "device_id: $device_id"
 SERVICE_FILE="/etc/systemd/system/sentinel-agent.service"
 SERVICE_CONTENT="[Unit]
 Description=Sentinel Agent Service
-After=network.target
+After=network-online.target
 
 [Service]
 ExecStart=/opt/sentinel-agent/access-agent-linux-amd64 $device_id
 WorkingDirectory=/opt/sentinel-agent/
 Restart=always
+RestartSec=10s
 User=root
 Group=root
 
