@@ -35,14 +35,14 @@ sudo bash -c "echo '$SERVICE_CONTENT' > $SERVICE_FILE"
 echo "Reloading systemd configuration"
 sudo systemctl daemon-reload
 
-# Start the service
-echo "Starting the sentinel service"
-sudo systemctl start sentinel-agent
-
 # Enable the service to start on boot
 echo "Enabling the sentinel service to start on boot"
-sudo systemctl enable sentinel-agent
+sudo systemctl enable sentinel-agent.service
+
+# Start the service
+echo "Starting the sentinel service"
+sudo systemctl start sentinel-agent.service
 
 # Check the status of the service
 echo "Checking the status of the sentinel service"
-sudo systemctl status sentinel-agent
+sudo systemctl status sentinel-agent.service
