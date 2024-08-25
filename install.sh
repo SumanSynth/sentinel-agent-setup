@@ -1,7 +1,13 @@
 #!/bin/bash
 echo "Installing sentinel agent"
 
-wget https://github.com/SumanSynth/sentinel-agent-setup/raw/develop/sentinel-agent-linux-amd64
+wget https://github.com/SumanSynth/sentinel-agent-setup/releases/download/v1.0.0/sentinel-agent-linux-amd64
+
+# Check if the directory exists
+if [ -d "/opt/sentinel-agent" ]; then
+  echo "Directory /opt/sentinel-agent already exists."
+  exit 1
+fi
 
 sudo mkdir /opt/sentinel-agent
 sudo mv sentinel-agent-linux-amd64 /opt/sentinel-agent/
