@@ -7,6 +7,13 @@ curl -sL https://raw.githubusercontent.com/SumanSynth/sentinel-agent-setup/devel
 
 ```
 
+## Update agent
+```
+curl -sL https://raw.githubusercontent.com/SumanSynth/sentinel-agent-setup/develop/update.sh -o update.sh && chmod +x update.sh && sudo ./update.sh
+
+```
+
+
 ## Remove agent
 ```
 curl -sL https://raw.githubusercontent.com/SumanSynth/sentinel-agent-setup/develop/uninstall.sh -o uninstall.sh && chmod +x uninstall.sh && sudo ./uninstall.sh
