@@ -8,7 +8,7 @@ if [ ! -d "/opt/sentinel-agent" ]; then
 fi
 
 # Download updated agent
-wget https://github.com/SumanSynth/sentinel-agent-setup/releases/download/v1.0.0/sentinel-agent-linux-amd64
+wget https://github.com/SumanSynth/sentinel-agent-setup/releases/download/v1.0.1/sentinel-agent-linux-amd64
 
 sudo mv sentinel-agent-linux-amd64 /opt/sentinel-agent/
 sudo chmod +x /opt/sentinel-agent/sentinel-agent-linux-amd64
