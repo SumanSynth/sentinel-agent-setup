@@ -15,8 +15,8 @@ if [[ "$arch" == "x86_64" ]]; then
   wget https://github.com/SumanSynth/sentinel-agent-setup/releases/download/v1.0.1/sentinel-agent-linux-amd64
 elif [[ "$arch" == "arm64" || "$arch" == "aarch64" ]]; then
   echo "ARM architecture detected."
-  wget https://github.com/SumanSynth/sentinel-agent-setup/releases/download/v1.0.1/sentinel-agent-apple-arm64
-  sudo mv sentinel-agent-apple-arm64 sentinel-agent-linux-amd64
+  wget https://github.com/SumanSynth/sentinel-agent-setup/releases/download/v1.0.1/sentinel-agent-linux-arm64
+  sudo mv sentinel-agent-linux-arm64 sentinel-agent-linux-amd64
 else
   echo "Unknown architecture: $arch"
   exit 1
