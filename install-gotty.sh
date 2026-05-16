@@ -2,16 +2,22 @@
 set -euo pipefail
 echo "Installing Gotty for sentinel-agent"
 
-GOTTY_VERSION_PATH="main"
+VERSION="v1.0.3"
 GOTTY_PORT="${GOTTY_PORT:-2222}"
 GOTTY_IP="${GOTTY_IP:-127.0.0.1}"
-REPO_RAW="https://raw.githubusercontent.com/SumanSynth/sentinel-agent-setup/${GOTTY_VERSION_PATH}"
-GOTTY_BIN_URL="${REPO_RAW}/bin/gotty"
-START_SCRIPT_URL="${REPO_RAW}/bin/start-gotty.sh"
+RELEASE_BASE="https://github.com/SumanSynth/sentinel-agent-setup/releases/download/$VERSION"
+RAW_BASE="https://raw.githubusercontent.com/SumanSynth/sentinel-agent-setup/main"
+GOTTY_BIN_URL="${RELEASE_BASE}/gotty"
+START_SCRIPT_URL="${RAW_BASE}/bin/start-gotty.sh"
 
 SERVICE_FILE="/etc/systemd/system/gotty.service"
 INSTALL_BIN="/opt/sentinel-agent/bin/gotty"
 INSTALL_START="/opt/sentinel-agent/bin/start-gotty.sh"
+
+if [[ $EUID -ne 0 ]]; then
+  echo "ERROR: run with sudo" >&2
+  exit 1
+fi
 
 # Exit non-zero if TCP $1 is in use, or if port cannot be checked (missing tools).
 gotty_require_port_free() {
@@ -95,21 +101,24 @@ cleanup_workdir() {
 }
 trap cleanup_workdir EXIT
 
-sudo mkdir -p /opt/sentinel-agent/bin
+mkdir -p /opt/sentinel-agent/bin
 
 echo "Downloading Gotty binary"
 wget -q -O "$WORKDIR/gotty.download" "$GOTTY_BIN_URL"
-sudo mv "$WORKDIR/gotty.download" "$INSTALL_BIN"
-sudo chmod +x "$INSTALL_BIN"
+mv "$WORKDIR/gotty.download" "$INSTALL_BIN"
+chmod +x "$INSTALL_BIN"
 
 echo "Downloading start script"
 wget -q -O "$WORKDIR/start-gotty.download" "$START_SCRIPT_URL"
-sudo mv "$WORKDIR/start-gotty.download" "$INSTALL_START"
-sudo chmod +x "$INSTALL_START"
+mv "$WORKDIR/start-gotty.download" "$INSTALL_START"
+chmod +x "$INSTALL_START"
 
-SERVICE_CONTENT="[Unit]
+echo "Creating service file at $SERVICE_FILE"
+cat > "$SERVICE_FILE" <<EOF
+[Unit]
 Description=Gotty Service
 After=network-online.target
+Wants=network-online.target
 
 [Service]
 Environment=GOTTY_IP=${GOTTY_IP}
@@ -123,25 +132,18 @@ Group=root
 
 [Install]
 WantedBy=multi-user.target
-"
-
-echo "Creating service file at $SERVICE_FILE"
-sudo bash -c "echo '$SERVICE_CONTENT' > $SERVICE_FILE"
+EOF
 
 echo "Reloading systemd configuration"
-sudo systemctl daemon-reload
+systemctl daemon-reload
 
 echo "Enabling the Gotty service to start on boot"
-sudo systemctl enable gotty.service
+systemctl enable gotty.service
 
 echo "Starting the Gotty service"
-sudo systemctl start gotty.service
+systemctl start gotty.service
 
 echo "Checking the status of the Gotty service"
-sudo systemctl status gotty.service || true
-
-self="${BASH_SOURCE[0]}"
-[[ "$self" = /* ]] || self="$(cd "$(dirname "$self")" && pwd)/$(basename "$self")"
-rm -f "$self"
+systemctl status gotty.service || true
 
 exit 0
