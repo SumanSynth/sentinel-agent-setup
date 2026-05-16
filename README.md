@@ -1,50 +1,110 @@
 # sentinel-agent-setup
-Public repo for sentinel agent setup
 
-## Gotty vs sentinel scripts
+Public distribution repo for the Sentinel Agent binary and installer scripts.
 
-- **install-gotty.sh** — Uses `wget` and a random directory from `mktemp` (under `$TMPDIR` or `/tmp`, pattern `sentinel-agent-setup.XXXXXX`). That directory is removed on **any** script exit via an `EXIT` trap. After a **successful** install it also deletes the downloaded `install-gotty.sh`. If the install exits early or fails before that final step (port busy, missing tools, `wget`/`sudo` error, etc.), the temp dir is still cleaned but **the downloaded script is kept** so you can retry.
-- **uninstall-gotty.sh** — After a **successful** uninstall it deletes the downloaded `uninstall-gotty.sh`. An early exit (e.g. nothing installed) **does not** delete the script.
-- **install-gotty.sh** port check requires **`ss`** (usually **iproute2**) **or** **`lsof`** on the host. If neither exists, the installer exits with an error before downloading.
-- **install.sh** / **update.sh** — `wget` release binaries into the **current directory** (no `mktemp`, no self-delete). **uninstall.sh** only removes `/opt/sentinel-agent` and the unit; it does not delete itself.
+> **Security model:** The binary contains AES-encrypted broker credentials.
+> The decryption key is never stored in the binary — it is supplied at install
+> time via `--key` and written to `/etc/sentinel-agent/env` (root-only, mode
+> `0600`). The binary alone cannot connect to the broker without the key.
 
-## Install agent
+---
+
+## Requirements
+
+- Linux (amd64 or arm64)
+- `wget`, `curl`, `uuidgen`, `systemd`
+- Root / sudo access
+
+---
+
+## Install
+
+Obtain your `SENTINEL_SECRET_KEY` from your admin or dashboard, then run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/SumanSynth/sentinel-agent-setup/main/install.sh \
+  | sudo bash -s -- --key YOUR_SENTINEL_SECRET_KEY
 ```
-curl -sL https://raw.githubusercontent.com/SumanSynth/sentinel-agent-setup/develop/install.sh -o install.sh && sudo chmod +x install.sh && sudo ./install.sh
 
+What the installer does:
+- Detects CPU architecture (amd64 / arm64) and downloads the correct binary
+- Generates a stable device ID and saves it to `/etc/sentinel-agent/device_id`
+- Writes the decryption key to `/etc/sentinel-agent/env` (mode `0600`, root only)
+- Creates and starts a systemd service (`sentinel-agent.service`)
+
+---
+
+## Update
+
+**New install (v1.0.3+):**
+```bash
+curl -fsSL https://raw.githubusercontent.com/SumanSynth/sentinel-agent-setup/main/update.sh \
+  | sudo bash
 ```
 
-## Update agent
+**Migrating from an old install (credentials were baked into the binary):**
+```bash
+curl -fsSL https://raw.githubusercontent.com/SumanSynth/sentinel-agent-setup/main/update.sh \
+  | sudo bash -s -- --key YOUR_SENTINEL_SECRET_KEY
 ```
-curl -sL https://raw.githubusercontent.com/SumanSynth/sentinel-agent-setup/develop/update.sh -o update.sh && sudo chmod +x update.sh && sudo ./update.sh
 
+The updater:
+- Recovers the existing device ID from the systemd unit (no identity change)
+- Writes the env file and updates the service unit if migrating from an old install
+- Atomically swaps the binary — the old binary keeps running until `mv` completes
+- Restarts the service
+
+---
+
+## Uninstall
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/SumanSynth/sentinel-agent-setup/main/uninstall.sh \
+  | sudo bash
 ```
 
+The uninstaller removes the binary, credentials, and service file.
+`/etc/sentinel-agent/device_id` is **intentionally kept** — if you reinstall
+later the device will retain the same identity.
 
-## Remove agent
-```
-curl -sL https://raw.githubusercontent.com/SumanSynth/sentinel-agent-setup/develop/uninstall.sh -o uninstall.sh && sudo chmod +x uninstall.sh && sudo ./uninstall.sh
+---
 
-```
+## Files installed on the machine
+
+| Path | Purpose |
+|---|---|
+| `/opt/sentinel-agent/sentinel-agent-linux-amd64` | Agent binary |
+| `/etc/sentinel-agent/env` | Decryption key (mode `0600`, root only) |
+| `/etc/sentinel-agent/device_id` | Stable device identity (persisted across reinstalls) |
+| `/etc/systemd/system/sentinel-agent.service` | Systemd unit |
+
+---
 
 ## Install Gotty (optional)
 
-Requires the sentinel agent install first (`/opt/sentinel-agent` must exist). Installs [Gotty](https://github.com/yudai/gotty) under `/opt/sentinel-agent/bin`, writes `gotty.service`, and starts it (defaults: bind `127.0.0.1`, port `2222`). Before downloading, it verifies the TCP port is free (see **`ss`** / **`lsof`** above). Set **`GOTTY_IP`** / **`GOTTY_PORT`** in the environment when running the installer if you need non-defaults; they are stored in the unit as `Environment=` for `start-gotty.sh`.
+Requires the sentinel agent to be installed first (`/opt/sentinel-agent` must
+exist). Installs [Gotty](https://github.com/yudai/gotty) under
+`/opt/sentinel-agent/bin`, writes `gotty.service`, and starts it (defaults:
+bind `127.0.0.1`, port `2222`). Requires `ss` (iproute2) or `lsof` to check
+the port before downloading.
 
-```
-curl -sL https://raw.githubusercontent.com/SumanSynth/sentinel-agent-setup/develop/install-gotty.sh -o install-gotty.sh && sudo chmod +x install-gotty.sh && sudo ./install-gotty.sh
+```bash
+curl -fsSL https://raw.githubusercontent.com/SumanSynth/sentinel-agent-setup/main/install-gotty.sh \
+  | sudo bash
 ```
 
-Example with custom bind/port:
-
-```
-sudo env GOTTY_IP=127.0.0.1 GOTTY_PORT=3333 ./install-gotty.sh
+Custom bind address / port:
+```bash
+curl -fsSL .../install-gotty.sh -o install-gotty.sh
+sudo env GOTTY_IP=127.0.0.1 GOTTY_PORT=3333 bash install-gotty.sh
 ```
 
 ## Remove Gotty
 
-Removes only the Gotty binary (`.../bin/gotty`), `start-gotty.sh`, and `gotty.service`. It does **not** remove `/opt/sentinel-agent/bin`, `/opt/sentinel-agent`, or any sentinel agent files. On success, deletes the downloaded `uninstall-gotty.sh` (see **Gotty vs sentinel scripts** above).
+Removes the Gotty binary, `start-gotty.sh`, and `gotty.service` only — does
+not touch the sentinel agent files.
 
-```
-curl -sL https://raw.githubusercontent.com/SumanSynth/sentinel-agent-setup/develop/uninstall-gotty.sh -o uninstall-gotty.sh && sudo chmod +x uninstall-gotty.sh && sudo ./uninstall-gotty.sh
+```bash
+curl -fsSL https://raw.githubusercontent.com/SumanSynth/sentinel-agent-setup/main/uninstall-gotty.sh \
+  | sudo bash
 ```
