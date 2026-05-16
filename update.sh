@@ -154,21 +154,24 @@ if ! "$TMP_BINARY" verify-key "$VERIFY_KEY"; then
   exit 1
 fi
 
-# ── step 6: update env file if key is being rotated ───────────────────────────
-if [[ -n "$NEW_KEY" ]]; then
-  echo "Updating secret key in $ENV_FILE ..."
-  mkdir -p "$(dirname "$ENV_FILE")"
-  cat > "$ENV_FILE" <<EOF
-SENTINEL_SECRET_KEY=$NEW_KEY
+# ── step 6: rewrite env file with active key + device id ─────────────────────
+# Always rewrite so SENTINEL_DEVICE_ID is present even on older installs that
+# only had SENTINEL_SECRET_KEY, and to apply any key rotation.
+ACTIVE_KEY="$VERIFY_KEY"
+[[ -n "$NEW_KEY" ]] && ACTIVE_KEY="$NEW_KEY"
+echo "Updating env file ..."
+mkdir -p "$(dirname "$ENV_FILE")"
+cat > "$ENV_FILE" <<EOF
+SENTINEL_SECRET_KEY=$ACTIVE_KEY
+SENTINEL_DEVICE_ID=$DEVICE_ID
 EOF
-  chmod 600 "$ENV_FILE"
-  chown root:root "$ENV_FILE"
-fi
+chmod 600 "$ENV_FILE"
+chown root:root "$ENV_FILE"
 
-# ── step 7: rewrite service file if EnvironmentFile is missing ────────────────
-if ! grep -q "EnvironmentFile" "$SERVICE_FILE" 2>/dev/null; then
-  echo "Updating service file to add EnvironmentFile ..."
-  cat > "$SERVICE_FILE" <<EOF
+# ── step 7: rewrite service file to canonical form ────────────────────────────
+# Ensures EnvironmentFile is present and device ID is no longer a CLI arg.
+echo "Updating service file ..."
+cat > "$SERVICE_FILE" <<EOF
 [Unit]
 Description=Sentinel Agent Service
 After=network-online.target
@@ -176,7 +179,7 @@ Wants=network-online.target
 
 [Service]
 EnvironmentFile=$ENV_FILE
-ExecStart=$INSTALL_DIR/sentinel-agent-linux-amd64 $DEVICE_ID
+ExecStart=$INSTALL_DIR/sentinel-agent-linux-amd64
 WorkingDirectory=$INSTALL_DIR/
 Restart=always
 RestartSec=10s
@@ -188,8 +191,7 @@ PrivateTmp=true
 [Install]
 WantedBy=multi-user.target
 EOF
-  systemctl daemon-reload
-fi
+systemctl daemon-reload
 
 # ── step 8: atomic swap ────────────────────────────────────────────────────────
 mv "$TMP_BINARY" "$BINARY"

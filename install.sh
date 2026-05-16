@@ -104,10 +104,11 @@ mkdir -p "$INSTALL_DIR"
 mv "$TMP_BINARY" "$BINARY"
 trap - EXIT   # binary moved, cancel temp-file cleanup
 
-# ── write key env file (root-only, mode 0600) ─────────────────────────────────
-echo "Writing secret key to $ENV_FILE ..."
+# ── write env file (root-only, mode 0600) ────────────────────────────────────
+echo "Writing env file to $ENV_FILE ..."
 cat > "$ENV_FILE" <<EOF
 SENTINEL_SECRET_KEY=$SECRET_KEY
+SENTINEL_DEVICE_ID=$DEVICE_ID
 EOF
 chmod 600 "$ENV_FILE"
 chown root:root "$ENV_FILE"
@@ -122,7 +123,7 @@ Wants=network-online.target
 
 [Service]
 EnvironmentFile=$ENV_FILE
-ExecStart=$INSTALL_DIR/sentinel-agent-linux-amd64 $DEVICE_ID
+ExecStart=$INSTALL_DIR/sentinel-agent-linux-amd64
 WorkingDirectory=$INSTALL_DIR/
 Restart=always
 RestartSec=10s
