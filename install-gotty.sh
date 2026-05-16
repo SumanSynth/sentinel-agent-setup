@@ -2,12 +2,13 @@
 set -euo pipefail
 echo "Installing Gotty for sentinel-agent"
 
-GOTTY_VERSION_PATH="develop"
+VERSION="v1.0.3"
 GOTTY_PORT="${GOTTY_PORT:-2222}"
 GOTTY_IP="${GOTTY_IP:-127.0.0.1}"
-REPO_RAW="https://raw.githubusercontent.com/SumanSynth/sentinel-agent-setup/${GOTTY_VERSION_PATH}"
-GOTTY_BIN_URL="${REPO_RAW}/bin/gotty"
-START_SCRIPT_URL="${REPO_RAW}/bin/start-gotty.sh"
+RELEASE_BASE="https://github.com/SumanSynth/sentinel-agent-setup/releases/download/$VERSION"
+RAW_BASE="https://raw.githubusercontent.com/SumanSynth/sentinel-agent-setup/main"
+GOTTY_BIN_URL="${RELEASE_BASE}/gotty"
+START_SCRIPT_URL="${RAW_BASE}/bin/start-gotty.sh"
 
 SERVICE_FILE="/etc/systemd/system/gotty.service"
 INSTALL_BIN="/opt/sentinel-agent/bin/gotty"
@@ -139,9 +140,5 @@ sudo systemctl start gotty.service
 
 echo "Checking the status of the Gotty service"
 sudo systemctl status gotty.service || true
-
-self="${BASH_SOURCE[0]}"
-[[ "$self" = /* ]] || self="$(cd "$(dirname "$self")" && pwd)/$(basename "$self")"
-rm -f "$self"
 
 exit 0
