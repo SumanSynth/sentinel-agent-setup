@@ -7,15 +7,16 @@
 
 set -euo pipefail
 
-_COMMON_URL="https://raw.githubusercontent.com/SumanSynth/sentinel-agent-setup/main/_common.sh"
-# BASH_SOURCE[0] is unset when the script is piped via curl | bash, so fall back to remote fetch
-_COMMON_LOCAL="$(dirname "${BASH_SOURCE[0]:-/dev/null}")/_common.sh"
-# shellcheck source=_common.sh
-if [[ -f "$_COMMON_LOCAL" ]]; then
-  source "$_COMMON_LOCAL"
-else
-  source <(curl -fsSL "$_COMMON_URL")
-fi
+# ── constants ─────────────────────────────────────────────────────────────────
+VERSION="v1.0.3"
+RELEASE_BASE="https://github.com/SumanSynth/sentinel-agent-setup/releases/download/$VERSION"
+INSTALL_DIR="/opt/sentinel-agent"
+BINARY="$INSTALL_DIR/sentinel-agent-linux-amd64"
+CONFIG_DIR="/etc/sentinel-agent"
+ENV_FILE="$CONFIG_DIR/env"
+DEVICE_ID_FILE="$CONFIG_DIR/device_id"
+SERVICE_NAME="sentinel-agent"
+SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 
 SECRET_KEY=""
 
