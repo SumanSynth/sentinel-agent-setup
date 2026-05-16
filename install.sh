@@ -1,68 +1,147 @@
 #!/bin/bash
-echo "Installing sentinel agent"
+# Sentinel Agent Installer
+#
+# Usage:
+#   curl -fsSL https://raw.githubusercontent.com/SumanSynth/sentinel-agent-setup/main/install.sh \
+#     | sudo bash -s -- --key <SENTINEL_SECRET_KEY>
 
-# Check if the directory exists
-if [ -d "/opt/sentinel-agent" ]; then
-  echo "Directory /opt/sentinel-agent already exists."
-  exit 1
-fi
+set -euo pipefail
 
-# Check CPU architecture
-arch=$(uname -m)
-
-if [[ "$arch" == "x86_64" ]]; then
-  echo "AMD architecture detected."
-  wget https://github.com/SumanSynth/sentinel-agent-setup/releases/download/v1.0.2/sentinel-agent-linux-amd64
-elif [[ "$arch" == "arm64" || "$arch" == "aarch64" ]]; then
-  echo "ARM architecture detected."
-  wget https://github.com/SumanSynth/sentinel-agent-setup/releases/download/v1.0.2/sentinel-agent-linux-arm64
-  sudo mv sentinel-agent-linux-arm64 sentinel-agent-linux-amd64
+_COMMON_URL="https://raw.githubusercontent.com/SumanSynth/sentinel-agent-setup/main/_common.sh"
+_COMMON_LOCAL="$(dirname "${BASH_SOURCE[0]}")/_common.sh"
+# shellcheck source=_common.sh
+if [[ -f "$_COMMON_LOCAL" ]]; then
+  source "$_COMMON_LOCAL"
 else
-  echo "Unknown architecture: $arch"
+  source <(curl -fsSL "$_COMMON_URL")
+fi
+
+SECRET_KEY=""
+
+# ── parse args ────────────────────────────────────────────────────────────────
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --key) SECRET_KEY="$2"; shift 2 ;;
+    *) echo "Unknown option: $1"; exit 1 ;;
+  esac
+done
+
+# ── root check ────────────────────────────────────────────────────────────────
+if [[ $EUID -ne 0 ]]; then
+  echo "ERROR: run with sudo" >&2
   exit 1
 fi
 
-sudo mkdir /opt/sentinel-agent
-sudo mv sentinel-agent-linux-amd64 /opt/sentinel-agent/
-sudo chmod +x /opt/sentinel-agent/sentinel-agent-linux-amd64
+# ── key required ──────────────────────────────────────────────────────────────
+if [[ -z "$SECRET_KEY" ]]; then
+  echo "ERROR: --key <SENTINEL_SECRET_KEY> is required" >&2
+  echo "       Obtain the key from your admin or dashboard." >&2
+  exit 1
+fi
 
-device_id=$(uuidgen)
-echo "device_id: $device_id"
+# ── guard: detect state of existing install ───────────────────────────────────
+if [[ -d "$INSTALL_DIR" ]]; then
+  if [[ -f "$ENV_FILE" ]]; then
+    echo "ERROR: sentinel agent is already installed (new version)." >&2
+    echo "       To update the binary:  sudo bash update.sh" >&2
+    echo "       To reinstall cleanly:  sudo bash uninstall.sh && sudo bash install.sh --key <KEY>" >&2
+  else
+    echo "ERROR: old version of sentinel agent is installed." >&2
+    echo "       To migrate to the new version: sudo bash update.sh --key $SECRET_KEY" >&2
+  fi
+  exit 1
+fi
 
-# Define variables
-SERVICE_FILE="/etc/systemd/system/sentinel-agent.service"
-SERVICE_CONTENT="[Unit]
+# ── detect architecture ───────────────────────────────────────────────────────
+arch=$(uname -m)
+case "$arch" in
+  x86_64)
+    echo "AMD64 architecture detected."
+    BINARY_NAME="sentinel-agent-linux-amd64"
+    ;;
+  arm64|aarch64)
+    echo "ARM64 architecture detected."
+    BINARY_NAME="sentinel-agent-linux-arm64"
+    ;;
+  *)
+    echo "ERROR: unsupported architecture: $arch" >&2
+    exit 1
+    ;;
+esac
+
+# ── device id ─────────────────────────────────────────────────────────────────
+mkdir -p "$(dirname "$DEVICE_ID_FILE")"
+if [[ -f "$DEVICE_ID_FILE" ]]; then
+  DEVICE_ID=$(cat "$DEVICE_ID_FILE")
+  echo "Reusing existing device id: $DEVICE_ID"
+else
+  DEVICE_ID=$(uuidgen | tr '[:upper:]' '[:lower:]')
+  echo "$DEVICE_ID" > "$DEVICE_ID_FILE"
+  chmod 600 "$DEVICE_ID_FILE"
+  echo "Generated device id: $DEVICE_ID"
+fi
+
+# ── download binary to temp ───────────────────────────────────────────────────
+TMP_BINARY=$(mktemp)
+trap 'rm -f "$TMP_BINARY"' EXIT
+
+echo "Downloading $BINARY_NAME ..."
+wget -q -O "$TMP_BINARY" "$RELEASE_BASE/$BINARY_NAME"
+chmod +x "$TMP_BINARY"
+
+# ── verify key against the downloaded binary ──────────────────────────────────
+echo "Verifying secret key against new binary ..."
+if ! "$TMP_BINARY" verify-key "$SECRET_KEY"; then
+  echo "ERROR: key verification failed — the key does not match this binary." >&2
+  echo "       Check that you are using the correct SENTINEL_SECRET_KEY." >&2
+  exit 1
+fi
+
+# ── install binary ────────────────────────────────────────────────────────────
+mkdir -p "$INSTALL_DIR"
+mv "$TMP_BINARY" "$BINARY"
+trap - EXIT   # binary moved, cancel temp-file cleanup
+
+# ── write key env file (root-only, mode 0600) ─────────────────────────────────
+echo "Writing secret key to $ENV_FILE ..."
+cat > "$ENV_FILE" <<EOF
+SENTINEL_SECRET_KEY=$SECRET_KEY
+EOF
+chmod 600 "$ENV_FILE"
+chown root:root "$ENV_FILE"
+
+# ── create systemd service ────────────────────────────────────────────────────
+echo "Creating service file at $SERVICE_FILE"
+cat > "$SERVICE_FILE" <<EOF
+[Unit]
 Description=Sentinel Agent Service
 After=network-online.target
+Wants=network-online.target
 
 [Service]
-ExecStart=/opt/sentinel-agent/sentinel-agent-linux-amd64 $device_id
-WorkingDirectory=/opt/sentinel-agent/
+EnvironmentFile=$ENV_FILE
+ExecStart=$INSTALL_DIR/sentinel-agent-linux-amd64 $DEVICE_ID
+WorkingDirectory=$INSTALL_DIR/
 Restart=always
 RestartSec=10s
 User=root
 Group=root
+NoNewPrivileges=true
+PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target
-"
+EOF
 
-# Create the service file
-echo "Creating service file at $SERVICE_FILE"
-sudo bash -c "echo '$SERVICE_CONTENT' > $SERVICE_FILE"
-
-# Reload systemd to recognize the new service file
+# ── start service ─────────────────────────────────────────────────────────────
 echo "Reloading systemd configuration"
-sudo systemctl daemon-reload
+systemctl daemon-reload
 
-# Enable the service to start on boot
 echo "Enabling the sentinel service to start on boot"
-sudo systemctl enable sentinel-agent.service
+systemctl enable sentinel-agent.service
 
-# Start the service
 echo "Starting the sentinel service"
-sudo systemctl start sentinel-agent.service
+systemctl start sentinel-agent.service
 
-# Check the status of the service
 echo "Checking the status of the sentinel service"
-sudo systemctl status sentinel-agent.service
+systemctl status sentinel-agent.service

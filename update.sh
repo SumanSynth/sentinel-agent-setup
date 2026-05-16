@@ -1,38 +1,206 @@
 #!/bin/bash
-echo "Updating sentinel agent"
+# Sentinel Agent Updater
+#
+# Usage (new version, same key):
+#   sudo bash update.sh
+#
+# Usage (new version + rotated key after a leak):
+#   sudo bash update.sh --new-key <NEW_SENTINEL_SECRET_KEY>
+#
+# Usage (migrating from old version — credentials were baked into the binary):
+#   sudo bash update.sh --key <SENTINEL_SECRET_KEY>
 
-# Check if the directory doesn't exist
-if [ ! -d "/opt/sentinel-agent" ]; then
-  echo "Directory /opt/sentinel-agent doesn't exist."
-  exit 1
-fi
+set -euo pipefail
 
-# Check CPU architecture
-arch=$(uname -m)
-
-if [[ "$arch" == "x86_64" ]]; then
-  echo "AMD architecture detected."
-  wget https://github.com/SumanSynth/sentinel-agent-setup/releases/download/v1.0.2/sentinel-agent-linux-amd64
-elif [[ "$arch" == "arm64" || "$arch" == "aarch64" ]]; then
-  echo "ARM architecture detected."
-  wget https://github.com/SumanSynth/sentinel-agent-setup/releases/download/v1.0.2/sentinel-agent-linux-arm64
-  sudo mv sentinel-agent-linux-arm64 sentinel-agent-linux-amd64
+_COMMON_URL="https://raw.githubusercontent.com/SumanSynth/sentinel-agent-setup/main/_common.sh"
+_COMMON_LOCAL="$(dirname "${BASH_SOURCE[0]}")/_common.sh"
+# shellcheck source=_common.sh
+if [[ -f "$_COMMON_LOCAL" ]]; then
+  source "$_COMMON_LOCAL"
 else
-  echo "Unknown architecture: $arch"
+  source <(curl -fsSL "$_COMMON_URL")
+fi
+
+SECRET_KEY=""      # for old-install migration (no env file exists yet)
+NEW_KEY=""         # for key rotation after a credential leak
+
+# ── parse args ────────────────────────────────────────────────────────────────
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --key)     SECRET_KEY="$2"; shift 2 ;;
+    --new-key) NEW_KEY="$2";    shift 2 ;;
+    *) echo "Unknown option: $1"; exit 1 ;;
+  esac
+done
+
+# ── root check ────────────────────────────────────────────────────────────────
+if [[ $EUID -ne 0 ]]; then
+  echo "ERROR: run with sudo" >&2
   exit 1
 fi
 
-sudo mv sentinel-agent-linux-amd64 /opt/sentinel-agent/
-sudo chmod +x /opt/sentinel-agent/sentinel-agent-linux-amd64
+if [[ ! -d "$INSTALL_DIR" ]]; then
+  echo "ERROR: $INSTALL_DIR doesn't exist — run install.sh first." >&2
+  exit 1
+fi
 
-# Enable the service to start on boot
-echo "Enabling the sentinel service to start on boot"
-sudo systemctl enable sentinel-agent.service
+# ── detect architecture ───────────────────────────────────────────────────────
+arch=$(uname -m)
+case "$arch" in
+  x86_64)
+    echo "AMD64 architecture detected."
+    BINARY_NAME="sentinel-agent-linux-amd64"
+    ;;
+  arm64|aarch64)
+    echo "ARM64 architecture detected."
+    BINARY_NAME="sentinel-agent-linux-arm64"
+    ;;
+  *)
+    echo "ERROR: unsupported architecture: $arch" >&2
+    exit 1
+    ;;
+esac
 
-# Start the service
+# ── step 1: recover / establish device id ─────────────────────────────────────
+recover_device_id() {
+  local id=""
+
+  if [[ -f "$DEVICE_ID_FILE" ]]; then
+    id=$(cat "$DEVICE_ID_FILE")
+    echo "Using persisted device id: $id" >&2
+    echo "$id"; return
+  fi
+
+  id=$(systemctl show sentinel-agent.service --property=ExecStart 2>/dev/null \
+    | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' \
+    | head -1 || true)
+
+  if [[ -z "$id" && -f "$SERVICE_FILE" ]]; then
+    id=$(grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' \
+      "$SERVICE_FILE" | head -1 || true)
+  fi
+
+  if [[ -n "$id" ]]; then
+    mkdir -p "$(dirname "$DEVICE_ID_FILE")"
+    echo "$id" > "$DEVICE_ID_FILE"
+    chmod 600 "$DEVICE_ID_FILE"
+    echo "Recovered and persisted device id: $id" >&2
+    echo "$id"; return
+  fi
+
+  id=$(uuidgen | tr '[:upper:]' '[:lower:]')
+  mkdir -p "$(dirname "$DEVICE_ID_FILE")"
+  echo "$id" > "$DEVICE_ID_FILE"
+  chmod 600 "$DEVICE_ID_FILE"
+  echo "WARNING: could not recover old device id — generated new: $id" >&2
+  echo "$id"
+}
+
+DEVICE_ID=$(recover_device_id)
+if [[ -z "$DEVICE_ID" ]]; then
+  echo "ERROR: failed to determine device id" >&2
+  exit 1
+fi
+
+# ── step 2: handle old install migration ──────────────────────────────────────
+MIGRATING=false
+if [[ ! -f "$ENV_FILE" ]]; then
+  MIGRATING=true
+  if [[ -z "$SECRET_KEY" && -z "$NEW_KEY" ]]; then
+    echo "ERROR: old install detected — no $ENV_FILE found." >&2
+    echo "       Re-run with --key <SENTINEL_SECRET_KEY> to migrate." >&2
+    exit 1
+  fi
+  # For old install migration, --key and --new-key mean the same thing
+  [[ -z "$NEW_KEY" ]] && NEW_KEY="$SECRET_KEY"
+fi
+
+# ── step 3: determine which key to verify against the new binary ───────────────
+# If --new-key supplied → validate new key against new binary, then update env.
+# Otherwise            → use key already in env file (no rotation).
+if [[ -n "$NEW_KEY" ]]; then
+  VERIFY_KEY="$NEW_KEY"
+elif [[ -f "$ENV_FILE" ]]; then
+  VERIFY_KEY=$(grep '^SENTINEL_SECRET_KEY=' "$ENV_FILE" | cut -d= -f2-)
+  if [[ -z "$VERIFY_KEY" ]]; then
+    echo "ERROR: SENTINEL_SECRET_KEY not found in $ENV_FILE" >&2
+    exit 1
+  fi
+else
+  echo "ERROR: no key available — provide --new-key or ensure $ENV_FILE exists." >&2
+  exit 1
+fi
+
+# ── step 4: download new binary to temp ───────────────────────────────────────
+TMP_BINARY=$(mktemp)
+trap 'rm -f "$TMP_BINARY"' EXIT
+
+echo "Downloading $BINARY_NAME ..."
+wget -q -O "$TMP_BINARY" "$RELEASE_BASE/$BINARY_NAME"
+chmod +x "$TMP_BINARY"
+
+# ── step 5: verify key against the NEW binary before touching anything ─────────
+echo "Verifying key against new binary ..."
+if ! "$TMP_BINARY" verify-key "$VERIFY_KEY"; then
+  echo "ERROR: key verification failed — new binary rejected the key." >&2
+  echo "       The current install has NOT been changed." >&2
+  if [[ -n "$NEW_KEY" ]]; then
+    echo "       Check that --new-key matches the credentials compiled into this release." >&2
+  else
+    echo "       The new release may require a new key. Re-run with --new-key <KEY>." >&2
+  fi
+  exit 1
+fi
+
+# ── step 6: update env file if key is being rotated ───────────────────────────
+if [[ -n "$NEW_KEY" ]]; then
+  echo "Updating secret key in $ENV_FILE ..."
+  mkdir -p "$(dirname "$ENV_FILE")"
+  cat > "$ENV_FILE" <<EOF
+SENTINEL_SECRET_KEY=$NEW_KEY
+EOF
+  chmod 600 "$ENV_FILE"
+  chown root:root "$ENV_FILE"
+fi
+
+# ── step 7: rewrite service file if EnvironmentFile is missing ────────────────
+if ! grep -q "EnvironmentFile" "$SERVICE_FILE" 2>/dev/null; then
+  echo "Updating service file to add EnvironmentFile ..."
+  cat > "$SERVICE_FILE" <<EOF
+[Unit]
+Description=Sentinel Agent Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=$ENV_FILE
+ExecStart=$INSTALL_DIR/sentinel-agent-linux-amd64 $DEVICE_ID
+WorkingDirectory=$INSTALL_DIR/
+Restart=always
+RestartSec=10s
+User=root
+Group=root
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl daemon-reload
+fi
+
+# ── step 8: atomic swap ────────────────────────────────────────────────────────
+mv "$TMP_BINARY" "$BINARY"
+trap - EXIT   # binary moved, cancel temp-file cleanup
+
+# ── step 9: restart ───────────────────────────────────────────────────────────
 echo "Restarting the sentinel service"
-sudo systemctl restart sentinel-agent.service
+systemctl restart sentinel-agent.service
 
-# Check the status of the service
 echo "Checking the status of the sentinel service"
-sudo systemctl status sentinel-agent.service
+systemctl status sentinel-agent.service
+
+if [[ "$MIGRATING" == "true" ]]; then
+  echo ""
+  echo "Migration complete. Future updates will not require --key."
+fi
