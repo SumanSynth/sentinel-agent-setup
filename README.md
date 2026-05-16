@@ -23,7 +23,7 @@ Obtain your `SENTINEL_SECRET_KEY` from your admin or dashboard, then run:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/SumanSynth/sentinel-agent-setup/main/install.sh \
-  | sudo bash -s -- --key <SENTINEL_SECRET_KEY>
+  | sudo bash -s -- --key YOUR_SENTINEL_SECRET_KEY
 ```
 
 What the installer does:
@@ -45,7 +45,7 @@ curl -fsSL https://raw.githubusercontent.com/SumanSynth/sentinel-agent-setup/mai
 **Migrating from an old install (credentials were baked into the binary):**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/SumanSynth/sentinel-agent-setup/main/update.sh \
-  | sudo bash -s -- --key <SENTINEL_SECRET_KEY>
+  | sudo bash -s -- --key YOUR_SENTINEL_SECRET_KEY
 ```
 
 The updater:
