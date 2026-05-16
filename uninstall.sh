@@ -4,7 +4,8 @@
 set -euo pipefail
 
 _COMMON_URL="https://raw.githubusercontent.com/SumanSynth/sentinel-agent-setup/main/_common.sh"
-_COMMON_LOCAL="$(dirname "${BASH_SOURCE[0]}")/_common.sh"
+# BASH_SOURCE[0] is unset when the script is piped via curl | bash, so fall back to remote fetch
+_COMMON_LOCAL="$(dirname "${BASH_SOURCE[0]:-/dev/null}")/_common.sh"
 # shellcheck source=_common.sh
 if [[ -f "$_COMMON_LOCAL" ]]; then
   source "$_COMMON_LOCAL"
