@@ -2,7 +2,7 @@
 set -euo pipefail
 echo "Installing Gotty for sentinel-agent"
 
-VERSION="v1.0.3"
+VERSION="v1.0.4"
 GOTTY_PORT="${GOTTY_PORT:-2222}"
 GOTTY_IP="${GOTTY_IP:-127.0.0.1}"
 RELEASE_BASE="https://github.com/SumanSynth/sentinel-agent-setup/releases/download/$VERSION"
