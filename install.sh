@@ -8,8 +8,7 @@
 set -euo pipefail
 
 # ── constants ─────────────────────────────────────────────────────────────────
-VERSION="v1.0.4"
-RELEASE_BASE="https://github.com/SumanSynth/sentinel-agent-setup/releases/download/$VERSION"
+RELEASE_BASE="https://control-centre-public.s3.ap-south-1.amazonaws.com/sentinel-agent"
 INSTALL_DIR="/opt/sentinel-agent"
 BINARY="$INSTALL_DIR/sentinel-agent-linux-amd64"
 CONFIG_DIR="/etc/sentinel-agent"
